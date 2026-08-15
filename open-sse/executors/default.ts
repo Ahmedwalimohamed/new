@@ -512,15 +512,20 @@ export class DefaultExecutor extends BaseExecutor {
 
   /**
    * Downgrade `response_format: { type: "json_schema" }` to `json_object` for
-   * `openai-compatible-*` providers, injecting the JSON schema into the system
-   * prompt instead. DeepSeek / Ollama / local OpenAI-compatible models often
-   * lack native Structured Output and return empty or malformed content when a
-   * `json_schema` response_format is forwarded as-is. Gated on the
-   * `openai-compatible-` provider family so providers with native Structured
-   * Output support keep the native `json_schema` path.
+   * `openai-compatible-*` providers AND `kilocode`, injecting the JSON schema
+   * into the system prompt instead. DeepSeek / Ollama / local OpenAI-compatible
+   * models often lack native Structured Output and return empty or malformed
+   * content when a `json_schema` response_format is forwarded as-is (kilocode's
+   * DeepSeek V4 Flash rejects it with HTTP 400 `Invalid input: response_format`,
+   * verified live 2026-08-15 — same class as #9992's opencode fix). Gated so
+   * providers with native Structured Output support keep the native
+   * `json_schema` path.
    */
   applyJsonSchemaFallback<T>(body: T): T {
-    if (!this.provider?.startsWith?.("openai-compatible-")) return body;
+    const provider = this.provider ?? "";
+    const isOpenAiCompatible = provider.startsWith("openai-compatible-");
+    const isKiloCode = provider === "kilocode";
+    if (!isOpenAiCompatible && !isKiloCode) return body;
     if (!body || typeof body !== "object" || Array.isArray(body)) return body;
 
     const record = body as Record<string, unknown>;

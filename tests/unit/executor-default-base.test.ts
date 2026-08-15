@@ -1063,6 +1063,43 @@ test("DefaultExecutor.transformRequest appends the json_schema prompt to an exis
   assert.equal(body.messages[0].content, "You are concise.");
 });
 
+// kilocode's DeepSeek V4 Flash rejects `json_schema` response_format with HTTP
+// 400 (verified live 2026-08-15: "Invalid input: response_format") — same class
+// as the opencode #9992 fix, but the default executor's gate only covered
+// `openai-compatible-*`, so kilocode forwarded the unsupported format raw.
+// It must be downgraded to json_object with the schema injected, like the
+// openai-compatible family.
+test("DefaultExecutor.transformRequest downgrades json_schema to json_object for kilocode (DeepSeek 400 regression)", () => {
+  const executor = new DefaultExecutor("kilocode");
+  const schema = {
+    type: "object",
+    properties: { answer: { type: "string" } },
+    required: ["answer"],
+  };
+  const body = {
+    model: "deepseek/deepseek-v4-flash",
+    messages: [{ role: "user", content: "give me JSON" }],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "answer_schema", schema },
+    },
+  };
+
+  const result = executor.transformRequest("deepseek/deepseek-v4-flash", body, true, {
+    providerSpecificData: { baseUrl: "https://api.kilo.ai/v1" },
+  }) as any;
+
+  assert.deepEqual(result.response_format, { type: "json_object" });
+  assert.equal(result.messages[0].role, "system");
+  assert.match(result.messages[0].content, /strictly follows this JSON schema/);
+  assert.ok(result.messages[0].content.includes('"answer"'));
+  assert.equal(result.messages[1].role, "user");
+  assert.equal(result.messages[1].content, "give me JSON");
+  // Original body is not mutated.
+  assert.equal((body as any).response_format.type, "json_schema");
+  assert.equal(body.messages.length, 1);
+});
+
 test("DefaultExecutor.transformRequest leaves json_schema response_format untouched for native providers", () => {
   const executor = new DefaultExecutor("openai");
   const responseFormat = {
